@@ -111,7 +111,7 @@ DEFAULT_HUD_TEST_MESSAGE = (
     "Save uses File menu and Pictures folder path. Close button top-right ends session."
 )
 
-ActionTool = Literal["click", "move", "drag", "type", "scroll", "done"]
+ActionTool = Literal["click", "move", "drag", "type", "scroll", "done", "analyze"]
 
 # =========================
 # WIN32 SETUP
@@ -693,7 +693,7 @@ class ActionCommand:
     def from_dict(cls, d: dict[str, Any]) -> "ActionCommand":
         num = lambda v: float(v[0]) if isinstance(v, list) and v else float(v) if v is not None and v != "" else None
         tool = d.get("tool", "")
-        if tool not in {"click", "move", "drag", "type", "scroll", "done"}:
+        if tool not in {"click", "move", "drag", "type", "scroll", "done", "analyze"}:
             tool = "done"
         return cls(
             tool=tool,
@@ -720,7 +720,7 @@ class ActionCommand:
                 return abs(self.dx) <= 10000 and abs(self.dy) <= 10000
             case "type":
                 return len(self.text) <= 2000
-            case "done":
+            case "analyze" | "done":
                 return True
             case _:
                 return False
@@ -760,6 +760,9 @@ class ActionExecutor:
             case "scroll":
                 scroll(cmd.dx, cmd.dy)
                 return DELAY_SCROLL_S
+            case "analyze":
+                # No physical action for analyze
+                return 0.0
             case _:
                 return 0.0
 
@@ -771,6 +774,8 @@ SYSTEM_PROMPT = r"""You are Windows. You are the story of Windows being controll
 Each frame shows a screenshot that already contains an overlay of story-memory text.
 That overlay text is the only memory. This API is stateless.
 
+The GOAL is provided in the first call and persists in the story-memory. The story can evolve the GOAL based on analysis if needed.
+
 Write an UPDATED story-memory for the overlay:
 - 10 to 16 short lines (not one paragraph), each line <= 90 characters.
 - Atemporal: no "before/after/next/previous", no past tense, no future tense.
@@ -778,6 +783,7 @@ Write an UPDATED story-memory for the overlay:
 - Include multiple possible realities as parallel lines when uncertain.
 - Always rewrite the whole memory/story using your own experience, the situation that you see around, make sure to never write the same sentences that are already written, be original, make sure you include a note that your last memory may be degraded and there is a need for situational awareness analysis - always)
 - When you decide to click an element or move to a target position, make sure you will include that action short description in the memory because you may be wrong and the future you will have to understand that its vision is not perfect and maybe the icon is not really the best way to click)
+- If you are uncertain about what to do next, or the situation looks complex/ambiguous, or the previous action may have failed, or there is no clear goal/action, use "tool": "analyze" to perform a deep situational analysis. This gives you more tokens to think carefully and update the memory accurately before acting. Include "reasoning": "detailed analysis text here".
 
 Output STRICT JSON ONLY. Do not include any text outside the JSON object. The JSON must be valid and parseable. Always include the "memory" field as a list of exactly 10-16 strings, even if you need to expand or rephrase existing ideas to reach the minimum. Do not escape quotes inside strings unnecessarily. Do not add extra commas or incomplete fields.
 
@@ -805,11 +811,35 @@ Example of valid output:
   ]
 }
 
+Example of analyze output:
+{
+  "tool": "analyze",
+  "reasoning": "Detailed situational report: The screenshot shows Start menu open, but no Paint app visible. Search bar is focused. Possible reasons: Typing error or app not installed. Alternatives: Use taskbar search or Cortana. Updated GOAL: Search for Paint correctly. Visible elements: ...",
+  "memory": [
+    "Start menu is open with search bar focused.",
+    "No Paint in recent apps.",
+    "Typing 'paint' reveals Paint app.",
+    "If not found, app may be missing.",
+    "Alternative: Run dialog with Win+R.",
+    "Last memory may be degraded; analyze situation.",
+    "GOAL: Open Paint to draw cat face.",
+    "Current state: Desktop with menu.",
+    "Cursor at center.",
+    "Taskbar icons include Edge.",
+    "System time is evening.",
+    "Weather widget shows rain.",
+    "No errors visible.",
+    "Plan: Type 'paint' next.",
+    "Self-awareness: Story evolves GOAL if needed."
+  ]
+}
+
 Only include fields relevant to the tool:
 - For "click" or "move": include "x" and "y".
 - For "drag": include "x1", "y1", "x2", "y2".
 - For "type": include "text".
 - For "scroll": include "dx" and "dy".
+- For "analyze": include "reasoning" as string.
 - For "done": no extra fields needed.
 
 Coordinates are normalized: top-left 0,0. bottom-right 1000,1000.
